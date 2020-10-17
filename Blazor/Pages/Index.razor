@@ -1,7 +1,17 @@
 ﻿@page "/"
 @inject IJSRuntime JSRuntime
-
-<h1>Maya's Times Tables</h1>
+<div class="f_options">
+    @{
+        for (var i = 1; i <= 12; i++)
+        {
+            var optionIndex = i - 1;
+            <span>
+                <label for="option@i">@i</label>
+                <input type="checkbox" checked="@_options[optionIndex]" value="@i" name="option@i" @onchange="async eventArgs => { await OptionClicked(optionIndex, (bool)eventArgs.Value); }" />
+            </span>
+        }
+    }
+</div>
 
 <div class="question">
     @if (_equation.IsMultipleFirst)
@@ -14,11 +24,11 @@
     }
 </div>
 
-<div>
-    <ul class="answers">
+<div class="answers">
+    <ul>
         @foreach (var equation in GetAnswers())
         {
-            <li class="@equation.ResultClass">
+            <li class="@(equation.IsCorrect ? "correct" : "incorrect")">
                 @if (equation.IsMultipleFirst)
                 {
                     RenderMultiple(equation);<span> = </span>RenderFactors(equation);
@@ -30,7 +40,7 @@
 
                 @if (!equation.IsCorrect)
                 {
-                    <span>@equation.OriginalResult</span>
+                    <span class="badResult">@equation.Result</span>
                 }
             </li>
         }
@@ -75,7 +85,7 @@
     
     void RenderInput() 
     {
-        <input placeholder="?" @bind-value="_result" @bind-value:event="oninput" @onkeyup="@KeyUp"  id="numberInput" />
+        <input type="number" placeholder="?" @bind-value="_result" @bind-value:event="oninput" @onkeyup="@KeyUp"  id="numberInput" />
     }
     
     void RenderFactors(Equation equation) 
@@ -85,37 +95,32 @@
 
     void RenderFactor1(Equation equation)
     {
-        if (equation.Factor1 != null)
-        {
-            <span>@equation.Factor1</span>
-        }
-        else
-        {
-            <span class="answer">@equation.Result</span>
-        }
+        RenderNumber(equation, equation.Factor1);
     }
 
     void RenderFactor2(Equation equation)
     {
-        if (equation.Factor2 != null)
-        {
-            <span>@equation.Factor2</span>
-        }
-        else
-        {
-            <span class="answer">@equation.Result</span>
-        }
+        RenderNumber(equation, equation.Factor2);
     }
     
     void RenderMultiple(Equation equation)
     {
-        if (equation.Multiple != null)
+        RenderNumber(equation, equation.Multiple);
+    }
+
+    void RenderNumber(Equation equation, int? number)
+    {
+        if (number != null)
         {
-            <span>@equation.Multiple</span>
+            <span>@number</span>
+        }
+        else if (equation.IsCorrect)
+        {
+            <span class="correctResult">@equation.Result</span>
         }
         else
         {
-            <span class="answer">@equation.Result</span>
+            <span class="correctedResult">@equation.OriginalResult</span>
         }
     }
 }
@@ -123,17 +128,19 @@
 @code {
     const string InputId = "numberInput";
     private readonly Random _random = new Random();
+
+    private bool[] _options = new bool[12];
     
     private readonly List<Equation> _answers = new List<Equation>();
 
     private Equation _equation;
     private string _result;
 
-    protected override Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync()
     {
         _equation = CreateEquation();
 
-        return Task.CompletedTask;
+        await JSRuntime.FocusAsync(InputId);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -147,19 +154,35 @@
 
     private Equation CreateEquation()
     {
-        var inputs = Enumerable.Range(0, 2).Select(x => (int?)_random.Next(1, 12)).ToList();
-        inputs.Add(inputs[0] * inputs[1]);
-        var resultIndex = _random.Next(0, 2);
-        var originalResult = inputs[resultIndex].Value;
-        inputs[resultIndex] = null;
+        int factor1;
+
+        var options = _options.Select((x, i) => x ? i + 1 : 0).Where(x => x != 0).ToArray();
+
+        if (options.Length > 0)
+        {
+            factor1 = options[_random.Next(options.Length)];
+        }
+        else {
+            factor1 = _random.Next(1, 12);
+        }
+
+        var input2 =  _random.Next(1, 12);
+        var multiply = factor1 * input2;
+
+        var equationOrder = _random.Next() > (Int32.MaxValue / 2);
+        var factorOrder = _random.Next() > (Int32.MaxValue / 2);
+        var hideMultiply = _random.Next() > (Int32.MaxValue / 2);
+
+        var factor2 = hideMultiply ? (int?)input2 : null;
+        var result = hideMultiply ? multiply : input2;
 
         return new Equation
         {
-            Factor1 = inputs[0],
-            Factor2 = inputs[1],
-            Multiple = inputs[2],
-            OriginalResult = originalResult,
-            IsMultipleFirst = _random.Next() > (Int32.MaxValue / 2)
+            Factor1 = factorOrder ? factor1 : factor2,
+            Factor2 = factorOrder ? factor2 : factor1,
+            Multiple = hideMultiply ? null : (int?)multiply,
+            OriginalResult = result,
+            IsMultipleFirst = equationOrder
         };
     }
     
@@ -187,6 +210,16 @@
         }        
     }
 
+    private async Task OptionClicked(int optionIndex, bool isClicked)
+    {
+        _options[optionIndex] = isClicked;
+
+        _equation = CreateEquation();
+        _result = null;
+
+        await JSRuntime.FocusAsync(InputId);
+    }
+
     private IEnumerable<Equation> GetAnswers()
     {
         for (var i = _answers.Count - 1; i >= 0; i--)
@@ -210,7 +243,5 @@
         public bool IsMultipleFirst { get; set; }
 
         public bool IsCorrect => Result == OriginalResult;
-
-        public string ResultClass => IsCorrect ? "correct" : "invalid";
     }
 }
